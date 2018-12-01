@@ -194,20 +194,23 @@ void Data::Read(const char * filename)
 
 int Data::GetFlow()
 {
-	int count = 0;// debug
+    dim3 grid( (this->rowSize + 31) / 32, (this->columnSize + 31) / 32, 1);
+    dim3 block(32, 1, 1);
+    
+	//int count = 0;// debug
 
 
     bool *active = new bool(true);
 	//this->active = true;
 	while (*active) {
     //for (int _ = 0; _ < 100; _ ++) {
-        count ++;
+        //count ++;
         //this->Print();
     
 		//this->active = false;
         cudaMemset( device_active, false, sizeof(bool) );
 
-        Data_PushLeftForLine<<< dim3(1, 1, 1), dim3(this->columnSize, 1, 1) >>>(            
+        Data_PushLeftForLine<<< grid, block >>>(            
             this->device_active,
             this->device_weightLeft,
             this->device_weightRight,
@@ -221,7 +224,7 @@ int Data::GetFlow()
 
         //cudaMemcpy(active, device_active, sizeof(bool), cudaMemcpyDeviceToHost);
 
-        Data_PushUpForLine<<< dim3(1, 1, 1), dim3(this->rowSize, 1, 1) >>>(            
+        Data_PushUpForLine<<< grid, block >>>(            
             this->device_active,
             this->device_weightUp,
             this->device_weightDown,
@@ -235,7 +238,7 @@ int Data::GetFlow()
 
         //cudaMemcpy(active, device_active, sizeof(bool), cudaMemcpyDeviceToHost);
 
-        Data_PushRightForLine<<< dim3(1, 1, 1), dim3(this->columnSize, 1, 1) >>>(            
+        Data_PushRightForLine<<< grid, block >>>(            
             this->device_active,
             this->device_weightLeft,
             this->device_weightRight,
@@ -249,7 +252,7 @@ int Data::GetFlow()
 
         //cudaMemcpy(active, device_active, sizeof(bool), cudaMemcpyDeviceToHost);
 
-        Data_PushDownForLine<<< dim3(1, 1, 1), dim3(this->rowSize, 1, 1) >>>(            
+        Data_PushDownForLine<<< grid, block >>>(            
             this->device_active,
             this->device_weightUp,
             this->device_weightDown,
@@ -263,7 +266,7 @@ int Data::GetFlow()
         cudaMemcpy(active, device_active, sizeof(bool), cudaMemcpyDeviceToHost);
 	}
     
-    std::cout << count << std::endl;
+    //std::cout << count << std::endl;
 
 //#ifdef DEBUG
     cudaMemcpy(weightS, device_weightS, sizeof(int) * rowSize * columnSize, cudaMemcpyDeviceToHost);

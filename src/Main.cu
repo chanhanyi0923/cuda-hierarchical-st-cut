@@ -2,10 +2,10 @@
 
 #include "Data.cuh"
 
-int main()
+int main(int argc, char *argv[])
 {
     Data * data = new Data;
-	data->Read("../../data/test3.txt");
+	data->Read(argv[1]);
 	int flow = data->GetFlow();
     data->BfsFromT();
 

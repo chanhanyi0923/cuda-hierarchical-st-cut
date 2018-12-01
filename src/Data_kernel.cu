@@ -1,78 +1,31 @@
 #include "Data_kernel.cuh"
 
-__device__
-bool Data_PushDown(
-    int *device_weightUp,
-    int *device_weightDown,
-    int *device_height,
-    int *device_capacity,
-    int columnSize,
-    // parameters
-    int x,
-    int y
-)
-{
-	if (y == 0) {
-		return false;
-	}
-
-	const size_t indexFrom = x * columnSize + y;
-	const size_t indexTo = x * columnSize + (y - 1);
-
-    if (device_height[indexFrom] != device_height[indexTo] + 1) {
-        return false;
-    }
-
-    int value = min(device_weightDown[indexFrom], device_capacity[indexFrom]);
-
-    device_weightDown[indexFrom] -= value;
-    device_capacity[indexFrom] -= value;
-
-    device_weightUp[indexTo] += value;
-    device_capacity[indexTo] += value;
-
-    device_height[indexTo] = device_capacity[indexTo] > 0 ? 1 : 0;
-
-    bool active = value > 0;
-    return active;
-}
+#define BLOCK_SIZE 32
 
 
 __device__
-bool Data_PushUp(
-    int *device_weightUp,
-    int *device_weightDown,
-    int *device_height,
-    int *device_capacity,
-    int columnSize,
-    // parameters
-    int x,
-    int y
+bool Data_Push(
+    int *weightFrom,
+    int *weightTo,
+    int *capacityFrom,
+    int *capacityTo,
+    int *heightFrom,
+    int *heightTo
 )
 {
-	if (y == columnSize - 1) {
-		return false;
-	}
-
-	const size_t indexFrom = x * columnSize + y;
-	const size_t indexTo = x * columnSize + (y + 1);
-
-    if (device_height[indexFrom] != device_height[indexTo] + 1) {
+    if (*heightFrom != *heightTo + 1) {
         return false;
     }
 
-    int value = min(device_weightUp[indexFrom], device_capacity[indexFrom]);
+    int value = min(*weightFrom, *capacityFrom);
 
-    device_weightUp[indexFrom] -= value;
-    device_capacity[indexFrom] -= value;
+    *weightFrom -= value;
+    *capacityFrom -= value;
+    *weightTo += value;
+    *capacityTo += value;
 
-    device_weightDown[indexTo] += value;
-    device_capacity[indexTo] += value;
-
-    device_height[indexTo] = device_capacity[indexTo] > 0 ? 1 : 0;
-
-    bool active = value > 0;
-    return active;
+    *heightTo = (*capacityTo) > 0 ? 1 : 0;
+    return value > 0; // active
 }
 
 
@@ -95,22 +48,14 @@ bool Data_PushLeft(
     const size_t indexFrom = x * columnSize + y;
     const size_t indexTo = (x - 1) * columnSize + y;
 
-    if (device_height[indexFrom] != device_height[indexTo] + 1) {
-        return false;
-    }
-
-    int value = min(device_weightLeft[indexFrom], device_capacity[indexFrom]);
-
-    device_weightLeft[indexFrom] -= value;
-    device_capacity[indexFrom] -= value;
-
-    device_weightRight[indexTo] += value;
-    device_capacity[indexTo] += value;
-
-    device_height[indexTo] = device_capacity[indexTo] > 0 ? 1 : 0;
-
-    bool active = value > 0;
-    return active;
+    return Data_Push(
+        &device_weightLeft[indexFrom],
+        &device_weightRight[indexTo],
+        &device_capacity[indexFrom],
+        &device_capacity[indexTo],
+        &device_height[indexFrom],
+        &device_height[indexTo]
+    );
 }
 
 
@@ -134,22 +79,74 @@ bool Data_PushRight(
 	const size_t indexFrom = x * columnSize + y;
 	const size_t indexTo = (x + 1) * columnSize + y;
 
-    if (device_height[indexFrom] != device_height[indexTo] + 1) {
-        return false;
-    }
+    return Data_Push(
+        &device_weightRight[indexFrom],
+        &device_weightLeft[indexTo],
+        &device_capacity[indexFrom],
+        &device_capacity[indexTo],
+        &device_height[indexFrom],
+        &device_height[indexTo]
+    );
+}
 
-    int value = min(device_weightRight[indexFrom], device_capacity[indexFrom]);
 
-    device_weightRight[indexFrom] -= value;
-    device_capacity[indexFrom] -= value;
+__device__
+bool Data_PushUp(
+    int *device_weightUp,
+    int *device_weightDown,
+    int *device_height,
+    int *device_capacity,
+    int columnSize,
+    // parameters
+    int x,
+    int y
+)
+{
+	if (y == columnSize - 1) {
+		return false;
+	}
 
-    device_weightLeft[indexTo] += value;
-    device_capacity[indexTo] += value;
+	const size_t indexFrom = x * columnSize + y;
+	const size_t indexTo = x * columnSize + (y + 1);
 
-    device_height[indexTo] = device_capacity[indexTo] > 0 ? 1 : 0;
+    return Data_Push(
+        &device_weightUp[indexFrom],
+        &device_weightDown[indexTo],
+        &device_capacity[indexFrom],
+        &device_capacity[indexTo],
+        &device_height[indexFrom],
+        &device_height[indexTo]
+    );
+}
 
-    bool active = value > 0;
-    return active;
+
+__device__
+bool Data_PushDown(
+    int *device_weightUp,
+    int *device_weightDown,
+    int *device_height,
+    int *device_capacity,
+    int columnSize,
+    // parameters
+    int x,
+    int y
+)
+{
+	if (y == 0) {
+		return false;
+	}
+
+	const size_t indexFrom = x * columnSize + y;
+	const size_t indexTo = x * columnSize + (y - 1);
+
+    return Data_Push(
+        &device_weightDown[indexFrom],
+        &device_weightUp[indexTo],
+        &device_capacity[indexFrom],
+        &device_capacity[indexTo],
+        &device_height[indexFrom],
+        &device_height[indexTo]
+    );
 }
 
 
@@ -189,7 +186,6 @@ void Data_PushToT(
 }
 
 
-
 __global__
 void Data_PushLeftForLine(
     bool *device_active,
@@ -204,37 +200,73 @@ void Data_PushLeftForLine(
 )
 {
     bool local_active = false;
-    //int tid = (blockIdx.y * gridDim.x + blockIdx.x) * (blockDim.x * blockDim.y) + threadIdx.y * blockDim.y + threadIdx.x;
-    int tid = threadIdx.x;
-    for (int i = rowSize - 1; i >= 0; i --) {
-        int x = i, y = tid;
-        Data_PushFromS(
-            device_weightS,
-            device_height,
-            device_capacity,
-            columnSize,
-            x,
-            y
-        );
-        bool active = Data_PushLeft(
-            device_weightLeft,
-            device_weightRight,
-            device_height,
-            device_capacity,
-            columnSize,
-            // parameters
-            x,
-            y
-        );
-        local_active = local_active || active;
-        Data_PushToT(
-            device_weightT,
-            device_height,
-            device_capacity,
-            columnSize,
-            x,
-            y
-        );
+
+    for (int i = BLOCK_SIZE - 1; i >= 1; i --) {
+        int x = blockIdx.x * BLOCK_SIZE + i;
+        int y = blockIdx.y * BLOCK_SIZE + threadIdx.x;
+        if (x < rowSize && y < columnSize) {
+            Data_PushFromS(
+                device_weightS,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
+            bool active = Data_PushLeft(
+                device_weightLeft,
+                device_weightRight,
+                device_height,
+                device_capacity,
+                columnSize,
+                // parameters
+                x,
+                y
+            );
+            local_active = local_active || active;
+            Data_PushToT(
+                device_weightT,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
+        }
+    }
+    __syncthreads();
+    { // i = 0
+        int x = blockIdx.x * BLOCK_SIZE;
+        int y = blockIdx.y * BLOCK_SIZE + threadIdx.x;
+        if (x < rowSize && y < columnSize) {
+            Data_PushFromS(
+                device_weightS,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
+            bool active = Data_PushLeft(
+                device_weightLeft,
+                device_weightRight,
+                device_height,
+                device_capacity,
+                columnSize,
+                // parameters
+                x,
+                y
+            );
+            local_active = local_active || active;
+            Data_PushToT(
+                device_weightT,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
+        }
     }
 
     if (local_active) {
@@ -257,38 +289,75 @@ void Data_PushRightForLine(
 )
 {
     bool local_active = false;
-    //int tid = (blockIdx.y * gridDim.x + blockIdx.x) * (blockDim.x * blockDim.y) + threadIdx.y * blockDim.y + threadIdx.x;
-    int tid = threadIdx.x;
-    for (int i = 0; i < rowSize; i ++) {
-        int x = i, y = tid;
-        Data_PushFromS(
-            device_weightS,
-            device_height,
-            device_capacity,
-            columnSize,
-            x,
-            y
-        );
-        bool active = Data_PushRight(
-            device_weightLeft,
-            device_weightRight,
-            device_height,
-            device_capacity,
-            rowSize,
-            columnSize,
-            // parameters
-            x,
-            y
-        );
-        local_active = local_active || active;
-        Data_PushToT(
-            device_weightT,
-            device_height,
-            device_capacity,
-            columnSize,
-            x,
-            y
-        );
+
+    for (int i = 0; i < BLOCK_SIZE - 1; i ++) {
+        int x = blockIdx.x * BLOCK_SIZE + i;
+        int y = blockIdx.y * BLOCK_SIZE + threadIdx.x;
+        if (x < rowSize && y < columnSize) {
+            Data_PushFromS(
+                device_weightS,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
+            bool active = Data_PushRight(
+                device_weightLeft,
+                device_weightRight,
+                device_height,
+                device_capacity,
+                rowSize,
+                columnSize,
+                // parameters
+                x,
+                y
+            );
+            local_active = local_active || active;
+            Data_PushToT(
+                device_weightT,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
+        }
+    }
+    __syncthreads();
+    { // i = BLOCK_SIZE - 1
+        int x = blockIdx.x * BLOCK_SIZE + (BLOCK_SIZE - 1);
+        int y = blockIdx.y * BLOCK_SIZE + threadIdx.x;
+        if (x < rowSize && y < columnSize) {
+            Data_PushFromS(
+                device_weightS,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
+            bool active = Data_PushRight(
+                device_weightLeft,
+                device_weightRight,
+                device_height,
+                device_capacity,
+                rowSize,
+                columnSize,
+                // parameters
+                x,
+                y
+            );
+            local_active = local_active || active;
+            Data_PushToT(
+                device_weightT,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
+        }
     }
 
     if (local_active) {
@@ -311,39 +380,77 @@ void Data_PushUpForLine(
 )
 {
     bool local_active = false;
-    //int tid = (blockIdx.y * gridDim.x + blockIdx.x) * (blockDim.x * blockDim.y) + threadIdx.y * blockDim.y + threadIdx.x;
-    int tid = threadIdx.x;
-    for (int i = 0; i < columnSize; i ++) {
-        int x = tid, y = i;
-        Data_PushFromS(
-            device_weightS,
-            device_height,
-            device_capacity,
-            columnSize,
-            x,
-            y
-        );
 
-        bool active = Data_PushUp(
-            device_weightUp,
-            device_weightDown,
-            device_height,
-            device_capacity,
-            columnSize,
-            // parameters
-            x,
-            y
-        );
-        local_active = local_active || active;
+    for (int i = 0; i < BLOCK_SIZE - 1; i ++) {
+        int x = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+        int y = blockIdx.y * BLOCK_SIZE + i;
+        if (x < rowSize && y < columnSize) {
+            Data_PushFromS(
+                device_weightS,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
 
-        Data_PushToT(
-            device_weightT,
-            device_height,
-            device_capacity,
-            columnSize,
-            x,
-            y
-        );
+            bool active = Data_PushUp(
+                device_weightUp,
+                device_weightDown,
+                device_height,
+                device_capacity,
+                columnSize,
+                // parameters
+                x,
+                y
+            );
+            local_active = local_active || active;
+
+            Data_PushToT(
+                device_weightT,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
+        }
+    }
+    __syncthreads();
+    { // i = BLOCK_SIZE - 1
+        int x = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+        int y = blockIdx.y * BLOCK_SIZE + (BLOCK_SIZE - 1);
+        if (x < rowSize && y < columnSize) {
+            Data_PushFromS(
+                device_weightS,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
+
+            bool active = Data_PushUp(
+                device_weightUp,
+                device_weightDown,
+                device_height,
+                device_capacity,
+                columnSize,
+                // parameters
+                x,
+                y
+            );
+            local_active = local_active || active;
+
+            Data_PushToT(
+                device_weightT,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
+        }
     }
 
     if (local_active) {
@@ -366,39 +473,77 @@ void Data_PushDownForLine(
 )
 {
     bool local_active = false;
-    //int tid = (blockIdx.y * gridDim.x + blockIdx.x) * (blockDim.x * blockDim.y) + threadIdx.y * blockDim.y + threadIdx.x;
-    int tid = threadIdx.x;
-    for (int i = columnSize - 1; i >= 0; i --) {
-        int x = tid, y = i;
-        Data_PushFromS(
-            device_weightS,
-            device_height,
-            device_capacity,
-            columnSize,
-            x,
-            y
-        );
 
-        bool active = Data_PushDown(
-            device_weightUp,
-            device_weightDown,
-            device_height,
-            device_capacity,
-            columnSize,
-            // parameters
-            x,
-            y
-        );
-        local_active = local_active || active;
+    for (int i = BLOCK_SIZE - 1; i >= 1; i --) {
+        int x = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+        int y = blockIdx.y * BLOCK_SIZE + i;
+        if (x < rowSize && y < columnSize) {
+            Data_PushFromS(
+                device_weightS,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
 
-        Data_PushToT(
-            device_weightT,
-            device_height,
-            device_capacity,
-            columnSize,
-            x,
-            y
-        );
+            bool active = Data_PushDown(
+                device_weightUp,
+                device_weightDown,
+                device_height,
+                device_capacity,
+                columnSize,
+                // parameters
+                x,
+                y
+            );
+            local_active = local_active || active;
+
+            Data_PushToT(
+                device_weightT,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
+        }
+    }
+    __syncthreads();
+    { // i = 0
+        int x = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+        int y = blockIdx.y * BLOCK_SIZE;
+        if (x < rowSize && y < columnSize) {
+            Data_PushFromS(
+                device_weightS,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
+
+            bool active = Data_PushDown(
+                device_weightUp,
+                device_weightDown,
+                device_height,
+                device_capacity,
+                columnSize,
+                // parameters
+                x,
+                y
+            );
+            local_active = local_active || active;
+
+            Data_PushToT(
+                device_weightT,
+                device_height,
+                device_capacity,
+                columnSize,
+                x,
+                y
+            );
+        }
     }
 
     if (local_active) {

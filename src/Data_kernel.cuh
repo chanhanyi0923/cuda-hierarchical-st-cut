@@ -1,25 +1,11 @@
 __device__
-bool Data_PushDown(
-    int *device_weightUp,
-    int *device_weightDown,
-    int *device_height,
-    int *device_capacity,
-    int columnSize,
-    // parameters
-    int x,
-    int y
-);
-
-__device__
-bool Data_PushUp(
-    int *device_weightUp,
-    int *device_weightDown,
-    int *device_height,
-    int *device_capacity,
-    int columnSize,
-    // parameters
-    int x,
-    int y
+bool Data_Push(
+    int *weightFrom,
+    int *weightTo,
+    int *capacityFrom,
+    int *capacityTo,
+    int *heightFrom,
+    int *heightTo
 );
 
 __device__
@@ -41,6 +27,30 @@ bool Data_PushRight(
     int *device_height,
     int *device_capacity,
     int rowSize,
+    int columnSize,
+    // parameters
+    int x,
+    int y
+);
+
+__device__
+bool Data_PushUp(
+    int *device_weightUp,
+    int *device_weightDown,
+    int *device_height,
+    int *device_capacity,
+    int columnSize,
+    // parameters
+    int x,
+    int y
+);
+
+__device__
+bool Data_PushDown(
+    int *device_weightUp,
+    int *device_weightDown,
+    int *device_height,
+    int *device_capacity,
     int columnSize,
     // parameters
     int x,
